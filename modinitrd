@@ -1,0 +1,147 @@
+#!/bin/sh
+#
+# Wrapper script for modifying an existing initrd file. Note that CPU microcode must
+# not already be prepended to the existing initrd. Instead, use the -P option to this
+# script to prepend it after modification.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+cwd=$(pwd)
+ucode=""
+debug_shell="no"
+input_file="/boot/initrd.gz"
+output_file="/boot/initrd.gz"
+output_mode="644"
+status=0
+
+# Since the initrd contains device node files, it has to be packed as root
+uid=$(uid -u)
+if [ ${uid} -ne 0 ]; then
+    echo "This script must be run as root" >&2
+    exit 2
+fi
+
+# Work in a temporary directory, but be absolutely sure of its permissions, in case
+# we want to pack sensitive data into the output file.
+workdir=$(mktemp -d)
+chmod 700 "${workdir}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -m|--permissions)
+            output_mode="$2"
+            shift 2
+        ;;
+        -o|--output)
+            output_file="$2"
+            shift 2
+        ;;
+        -P|--ucode)
+            ucode="$2"
+            shift 2
+        ;;
+        --debug)
+            debug_shell="yes"
+            shift
+        ;;
+        *)
+            break
+        ;;
+    esac
+done
+
+if [ $# -eq 0 ]; then
+    cat << EOF
+Usage: $0 [options] <script_file> [[script_file] ...]
+
+Valid options:
+    -m <mode> | --permissions <mode>
+        Output file mode (default 644)
+    -o <output_file> | --output <output_file>
+        Specify the output file for the generated initrd.
+        Default is /boot/initrd.gz
+    -P <ucode_file> | --ucode <ucode_file>
+        Specify a processor microcode file to prepend to the initrd image
+    --debug
+        Enter a debugging shell (/bin/sh) after packing the initrd but before
+        moving to its output destination. If the debugging shell is exited
+        with a nonzero status (e.g. using "exit 1"), then the initrd will not
+        be moved to the output directory and will instead be deleted on
+        script cleanup.
+EOF
+    exit 2
+fi
+
+# Start by unpacking the initrd
+mkdir repack
+cd repack
+zcat /tmp/initrd.in.gz | cpio -i -d --no-absolute-filenames -H newc
+
+# Run the specified scripts
+while [ $# -gt 0 ]; do
+    script="$1"
+    shift
+    if ! echo "${script}" | grep -q '^/'; then
+        script="${cwd}/${script}"
+    fi
+    if [ -x "${script}" ]; then
+        "${script}"
+        chk=$?
+        [ ${status} -eq 0 ] && status=${chk}
+    else
+        echo "File not found: ${script}"
+        status=1
+    fi
+done
+
+# Rebuild the initrd the same way makepkg does it
+find . | cpio -o -H newc | gzip -9c > "../initrd.new.gz"
+cd ..
+
+# If microcode was requested, prepend it
+if [ -n "${ucode}" ]; then
+    cat "${ucode}" initrd.new.gz > initrd.new.gz.ucode
+    mv initrd.new.gz.ucode initrd.new.gz
+fi
+
+# Set permissions as requested
+chmod ${output_mode} initrd.new.gz
+
+# If a debugging shell has been requested, enter it now
+if [ "x${debug_shell}" = "xyes" ]; then
+    echo "Entering debugging shell at ${workdir}"
+    echo "Exit with non-zero status to prevent copying the output file"
+    /bin/sh
+    status=$?
+fi
+
+# Deposit the output file, and double-check permissions
+if [ ${status} -eq 0 ]; then
+    mv initrd.new.gz "${output_file}"
+    chmod ${output_mode} "${output_file}"
+else
+    echo "An error occurred: skipping output file creation" >&2
+fi
+
+# Clean up
+cd "${cwd}"
+[ "${workdir}" != "/" ] && rm -rf "${workdir}"

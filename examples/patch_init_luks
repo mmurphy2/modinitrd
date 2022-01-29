@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# modinitrd script for patching the Slackware Linux BusyBox init to support
+# unlocking a fully encrypted root device that also contains /boot. The GRUB
+# bootloader must be used with this type of configuration. However, only GRUB
+# needs to be left unencrypted, since it can read and decrypt LUKS (v1-only)
+# volumes.
+#
+# Copyright 2022 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+
+# Patch the BusyBox init script to support unlocking from an embedded LUKS key
+patch -p1 << EOF
+diff -uNr mkinitrd.orig/init mkinitrd/init
+--- mkinitrd.orig/init  2022-01-27 08:19:52.483111334 -0500
++++ mkinitrd/init       2022-01-27 08:30:26.158561755 -0500
+@@ -50,6 +50,9 @@
+ # /lukskey        Contains the path to a LUKS key-file for automatic unlock
+ #                 Format: LABEL=<partition_label>:/path/to/file
+ #                         UUID=<partition_uuid>:/path/to/file
++#                         embed
++#
++# /luksvolkey     LUKS volume key file that is used for unlock from rootfs
+ #
+ # /wait-for-root  Contains a number - the init script will wait this amount
+ #                 of seconds before creating device nodes.
+@@ -201,14 +204,18 @@
+       mkdir  /mountkey
+       KEYPART=\$(echo \$LUKSKEY |cut -f1 -d:)
+       KEYNAME=\$(echo \$KEYPART |cut -f2 -d=)
+-      LUKSPATH="/mountkey\$(echo \$LUKSKEY |cut -f2 -d:)"
+-      # Catch possible mount failure:
+-      if blkid |grep "TYPE=\\"vfat\\"" |grep \$KEYNAME 1>/dev/null 2>&1 ; then
+-        MOUNTOPTS="-t vfat -o shortname=mixed"
++      if [ "x\\$KEYPART" = "xembed" ]; then
++        LUKSPATH=/luksvolkey
+       else
+-        MOUNTOPTS="-t auto"
++        LUKSPATH="/mountkey\$(echo \$LUKSKEY |cut -f2 -d:)"
++        # Catch possible mount failure:
++        if blkid |grep "TYPE=\\"vfat\\"" |grep \$KEYNAME 1>/dev/null 2>&1 ; then
++          MOUNTOPTS="-t vfat -o shortname=mixed"
++        else
++          MOUNTOPTS="-t auto"
++        fi
++        mount \$MOUNTOPTS \$(findfs \$KEYPART) /mountkey 2>/dev/null
+       fi
+-      mount \$MOUNTOPTS \$(findfs \$KEYPART) /mountkey 2>/dev/null
+       # Check if we can actually use this file:
+       if [ ! -f \$LUKSPATH ]; then
+         LUKSKEY=""
+EOF
