@@ -34,16 +34,11 @@ output_mode="644"
 status=0
 
 # Since the initrd contains device node files, it has to be packed as root
-uid=$(uid -u)
+uid=$(id -u)
 if [ ${uid} -ne 0 ]; then
     echo "This script must be run as root" >&2
     exit 2
 fi
-
-# Work in a temporary directory, but be absolutely sure of its permissions, in case
-# we want to pack sensitive data into the output file.
-workdir=$(mktemp -d)
-chmod 700 "${workdir}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -90,6 +85,12 @@ Valid options:
 EOF
     exit 2
 fi
+
+# Work in a temporary directory, but be absolutely sure of its permissions, in case
+# we want to pack sensitive data into the output file.
+workdir=$(mktemp -d)
+chmod 700 "${workdir}"
+cd "${workdir}"
 
 # Start by unpacking the initrd
 mkdir repack
