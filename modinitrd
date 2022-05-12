@@ -95,7 +95,7 @@ cd "${workdir}"
 # Start by unpacking the initrd
 mkdir repack
 cd repack
-zcat /tmp/initrd.in.gz | cpio -i -d --no-absolute-filenames -H newc
+zcat /tmp/initrd.in.gz | cpio -i -d -H newc
 
 # Run the specified scripts
 while [ $# -gt 0 ]; do

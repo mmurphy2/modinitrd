@@ -51,7 +51,7 @@ diff -uNr mkinitrd.orig/init mkinitrd/init
 -      # Catch possible mount failure:
 -      if blkid |grep "TYPE=\\"vfat\\"" |grep \$KEYNAME 1>/dev/null 2>&1 ; then
 -        MOUNTOPTS="-t vfat -o shortname=mixed"
-+      if [ "x\\$KEYPART" = "xembed" ]; then
++      if [ "x\$KEYPART" = "xembed" ]; then
 +        LUKSPATH=/luksvolkey
        else
 -        MOUNTOPTS="-t auto"
